@@ -4,12 +4,14 @@ namespace App\Services;
 
 use App\Helpers\ApiResponse;
 use App\Constants\BookStatus;
+use App\Events\BookCreated;
 use App\Helpers\BookHelper;
 use Illuminate\Support\Facades\DB;
 use App\Services\VersionService;
 use Exception;
 use Illuminate\Http\UploadedFile;
 use PhpOffice\PhpWord\IOFactory;
+use App\Jobs\ProcessBookUploadJob;
 
 class BookService
 {
@@ -41,6 +43,8 @@ class BookService
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
+
+            event(new BookCreated($bookId));
 
             return ApiResponse::success(
                 'Book created successfully',
@@ -267,77 +271,7 @@ class BookService
                     'updated_at' => now()
                 ]);
 
-            $fullPath = storage_path('app/public/' . $path);
-
-            $phpWord = IOFactory::load($fullPath);
-
-            $content = '';
-
-            foreach ($phpWord->getSections()as $section) {
-
-                foreach ($section->getElements()as $element) {
-
-                    if (method_exists($element,'getText')) {
-                        $content .=
-                            $element->getText()
-                            . "\n";
-                    }
-                }
-            }
-
-            if (empty(trim($content))) {
-
-                return ApiResponse::error(
-                    'Unable to extract content from document',
-                    422
-                );
-            }
-
-            //keep only the latest imported chapter
-            DB::table('chapters')
-                ->where('book_id', $bookId)
-                ->where('title', 'Imported Chapter')
-                ->whereNull('deleted_at')
-                ->update([
-                    'deleted_at' => now()
-                ]);
-
-            $chapterId = DB::table('chapters')
-                ->insertGetId([
-
-                    'book_id' => $bookId,
-
-                    'title'  => pathinfo($file->getClientOriginalName(),PATHINFO_FILENAME),
-
-                    'sort_order' => 1,
-
-                    'created_at' => now(),
-
-                    'updated_at' => now()
-                ]);
-
-            $pageLength = 3000;
-
-            $chunks = str_split($content,$pageLength);
-
-            foreach ($chunks as $index => $chunk) {
-
-                DB::table('pages')
-                    ->insert([
-
-                        'chapter_id' => $chapterId,
-
-                        'title' =>'Page '. ($index + 1),
-
-                        'content' =>'<p>'. nl2br(e($chunk)). '</p>',
-
-                        'page_number' =>($index + 1),
-
-                        'created_at' => now(),
-
-                        'updated_at' => now()
-                    ]);
-            }
+            ProcessBookUploadJob::dispatch($bookId,$path,$file->getClientOriginalName(),auth()->id());
 
             $this->versionService
                 ->createSnapshot($bookId);
@@ -345,11 +279,7 @@ class BookService
             DB::commit();
 
             return ApiResponse::success(
-                'Document uploaded successfully',
-                [
-                    'pages_created' =>
-                        count($chunks)
-                ]
+                'Document uploaded successfully and queued for processing'
             );
 
         } catch (Exception $e) {

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Events\BookPublished;
+use App\Events\BookSubmitted;
 use Exception;
 use App\Helpers\ApiResponse;
 use Illuminate\Support\Facades\DB;
@@ -110,6 +112,9 @@ class WorkflowService
                 ]);
 
             DB::commit();
+
+            event(new BookSubmitted($bookId));
+
 
             $this->versionService
                 ->createSnapshot($bookId);
@@ -333,6 +338,8 @@ class WorkflowService
                     'updated_at' => now()
                 ]);
 
+            event(new BookPublished($bookId));
+                
             $this->versionService
                 ->createSnapshot($bookId);
 

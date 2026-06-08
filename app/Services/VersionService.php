@@ -2,10 +2,10 @@
 
 namespace App\Services;
 
+use App\Events\BookVersionCreated;
 use Exception;
 use App\Helpers\ApiResponse;
 use Illuminate\Support\Facades\DB;
-
 
 class VersionService
 {
@@ -110,7 +110,7 @@ class VersionService
         );
     }
 
-    public function createSnapshot(int $bookId): int
+    public function createSnapshot(int $bookId,?int $userId = null): int
     {
         $book = DB::table('books')
             ->where('id', $bookId)
@@ -159,7 +159,7 @@ class VersionService
                 'book_id' => $bookId,
                 'version_number' => $versionNumber,
                 'snapshot' => json_encode($snapshot),
-                'created_by' => auth()->id(),
+                'created_by' => $userId ?? auth()->id(),
                 'created_at' => now(),
                 'updated_at' => now()
             ]);
@@ -169,6 +169,8 @@ class VersionService
             ->update([
                 'current_version_id' => $versionId
             ]);
+
+        event(new BookVersionCreated($versionId,$bookId));
 
         return $versionId;
     }
